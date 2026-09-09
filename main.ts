@@ -134,8 +134,19 @@ function matmul(m1: number[][], m2: number[][]): number[][] {
     return result;
 }
 
+// init a new vertices array that has fourth element w
+const verticesTransform: number[] = [];
+
 function render() {
-    const verticesTransform = vertices.slice();
+    // reinit from model verticesTransform
+    // make every vector 4 long instead of 3 long, have space for w
+    for (let i = 0; i < vertices.length / 3; i ++) {
+        verticesTransform[4 * i] = vertices[3 * i];
+        verticesTransform[4 * i + 1] = vertices[3 * i + 1];
+        verticesTransform[4 * i + 2] = vertices[3 * i + 2];
+        verticesTransform[4 * i + 3] = 1;
+    }
+
     //// model to world coords
     // scale matrix
     const matrixS = [
@@ -181,20 +192,7 @@ function render() {
     const matrixFullR = matmul(matrixRy, matmul(matrixRx, matrixRz));
     // Full Model/World matrix: Scale -> Rotate -> Translate
     const matrixM = matmul(matrixT, matmul(matrixFullR, matrixS));
-    // apply to vertices
-    for (let i = 0; i < verticesTransform.length; i += 3) {
-        const vertex = [
-            [verticesTransform[i]],
-            [verticesTransform[i + 1]],
-            [verticesTransform[i + 2]],
-            [1],
-        ];
-        const newVertex = matmul(matrixM, vertex);
-        verticesTransform[i] = newVertex[0][0];
-        verticesTransform[i + 1] = newVertex[1][0];
-        verticesTransform[i + 2] = newVertex[2][0];
-    }
-    //// move the world for the camera
+    //// world to camera coords
     // basis construction
     const eye = [cex, cey, cez];
     const target = [ctx, cty, ctz];
@@ -209,20 +207,7 @@ function render() {
         [zAxis[0], zAxis[1], zAxis[2], -vectordot(zAxis, eye)],
         [0, 0, 0, 1]
     ]
-    // apply to vertices
-    for (let i = 0; i < verticesTransform.length; i += 3) {
-        const vertex = [
-            [verticesTransform[i]],
-            [verticesTransform[i + 1]],
-            [verticesTransform[i + 2]],
-            [1],
-        ];
-        const newVertex = matmul(matrixV, vertex);
-        verticesTransform[i] = newVertex[0][0];
-        verticesTransform[i + 1] = newVertex[1][0];
-        verticesTransform[i + 2] = newVertex[2][0];
-    }
-    //// perspective
+    //// clip space
     // matrix for clip space
     const f = 1 / Math.tan(cfy / 2);
     const A = -(cf + cn) / (cf - cn);
@@ -233,21 +218,37 @@ function render() {
         [0, 0, A, B],
         [0, 0, -1, 0]
     ];
-    // apply to vertices
-    for (let i = 0; i < verticesTransform.length; i += 3) {
+    //// combined matrix
+    const matrixMVC = matmul(matrixC, matmul(matrixV, matrixM));
+    // apply combined matrix to vertices
+    for (let i = 0; i < verticesTransform.length; i += 4) {
         const vertex = [
             [verticesTransform[i]],
             [verticesTransform[i + 1]],
             [verticesTransform[i + 2]],
-            [1],
+            [verticesTransform[i + 3]],
         ];
-        const newVertex = matmul(matrixC, vertex);
-        const w = newVertex[3][0];
+        const newVertex = matmul(matrixMVC, vertex);
+        verticesTransform[i] = newVertex[0][0];
+        verticesTransform[i + 1] = newVertex[1][0];
+        verticesTransform[i + 2] = newVertex[2][0];
+        verticesTransform[i + 3] = newVertex[3][0];
+    }
+    //// perspective/actual clipping
+    // apply to vertices
+    for (let i = 0; i < verticesTransform.length; i += 4) {
+        const vertex = [
+            [verticesTransform[i]],
+            [verticesTransform[i + 1]],
+            [verticesTransform[i + 2]],
+            [verticesTransform[i + 3]],
+        ];
+        const w = vertex[3][0];
         if (w > 0) {
             // now in NDC
-            verticesTransform[i] = newVertex[0][0] / w;
-            verticesTransform[i + 1] = newVertex[1][0] / w;
-            verticesTransform[i + 2] = newVertex[2][0] / w;
+            verticesTransform[i] = vertex[0][0] / w;
+            verticesTransform[i + 1] = vertex[1][0] / w;
+            verticesTransform[i + 2] = vertex[2][0] / w;
             // convert X and Y to screen coords, Z still in NDC (-1 near, 1 far plane)
             verticesTransform[i] = (verticesTransform[i] + 1) * 0.5 * width;
             verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height;  // flip Y, NDC has +Y up, screen has +Y down
@@ -268,12 +269,12 @@ function render() {
         const i1 = indices[i + 1];
         const i2 = indices[i + 2];
         // get px coords
-        const ax = verticesTransform[3 * i0];
-        const ay = verticesTransform[3 * i0 + 1];
-        const bx = verticesTransform[3 * i1];
-        const by = verticesTransform[3 * i1 + 1];
-        const cx = verticesTransform[3 * i2];
-        const cy = verticesTransform[3 * i2 + 1];
+        const ax = verticesTransform[4 * i0];
+        const ay = verticesTransform[4 * i0 + 1];
+        const bx = verticesTransform[4 * i1];
+        const by = verticesTransform[4 * i1 + 1];
+        const cx = verticesTransform[4 * i2];
+        const cy = verticesTransform[4 * i2 + 1];
         // for now skip if any NaN
         if (ax !== ax || ay !== ay || bx !== bx || by !== by || cx !== cx || cy !== cy) {
             continue;
