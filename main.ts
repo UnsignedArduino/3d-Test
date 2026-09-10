@@ -342,6 +342,32 @@ function render() {
         }
         // console.log(`${verticesTransform[0]}, ${verticesTransform[1]}, ${verticesTransform[2]}`);
     }
+    //// backface cull
+    // todo: sx = -1 or similar may make it disappear, fix later
+    let newTrianglesTransformCount = 0;
+    for (let i = 0; i < trianglesTransformCount * 3; i += 3) {
+        // fetch vertex indices
+        const i0 = trianglesTransform[i];
+        const i1 = trianglesTransform[i + 1];
+        const i2 = trianglesTransform[i + 2];
+        // get px coords
+        const ax = verticesTransform[4 * i0];
+        const ay = verticesTransform[4 * i0 + 1];
+        const bx = verticesTransform[4 * i1];
+        const by = verticesTransform[4 * i1 + 1];
+        const cx = verticesTransform[4 * i2];
+        const cy = verticesTransform[4 * i2 + 1];
+        // calculate area
+        const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+        // area = negative means front facing (keep)
+        if (area < 0) {
+            trianglesTransform[3 * newTrianglesTransformCount] = i0;
+            trianglesTransform[3 * newTrianglesTransformCount + 1] = i1;
+            trianglesTransform[3 * newTrianglesTransformCount + 2] = i2;
+            newTrianglesTransformCount ++;
+        }
+    }
+    trianglesTransformCount = newTrianglesTransformCount;
     //// wireframe draw!!!
     // draw triangles out
     for (let i = 0; i < trianglesTransformCount * 3; i += 3) {
@@ -349,6 +375,9 @@ function render() {
         const i0 = trianglesTransform[i];
         const i1 = trianglesTransform[i + 1];
         const i2 = trianglesTransform[i + 2];
+        if (i0 < 0 || i1 < 0 || i2 < 0) {
+            continue;
+        }
         // get px coords
         const ax = verticesTransform[4 * i0];
         const ay = verticesTransform[4 * i0 + 1];
@@ -367,9 +396,9 @@ function render() {
 }
 
 game.onUpdate(() => {
-    // rx = game.runtime() / 4000 * Math.PI;
+    rx = game.runtime() / 4000 * Math.PI;
     ry = game.runtime() / 4000 * Math.PI;
-    // rz = game.runtime() / 4000 * Math.PI;
+    rz = game.runtime() / 4000 * Math.PI;
 
     picture.fill(0);
     render();
