@@ -250,6 +250,8 @@ function render() {
     // append a new vertex on the segment ia->ib, exactly on the near plane.
     // both are indices into verticesTransform, in CLIP SPACE (before divide).
     function clipLerpNear(ia: number, ib: number): number {
+        if (ia > ib) { const t = ia; ia = ib; ib = t; }
+
         const a = 4 * ia;
         const b = 4 * ib;
         const wa = verticesTransform[a + 3];
@@ -332,8 +334,9 @@ function render() {
             verticesTransform[i + 1] = vertex[1][0] / w;
             verticesTransform[i + 2] = vertex[2][0] / w;
             // convert X and Y to screen coords, Z still in NDC (-1 near, 1 far plane)
-            verticesTransform[i] = (verticesTransform[i] + 1) * 0.5 * width;
-            verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height;  // flip Y, NDC has +Y up, screen has +Y down
+            verticesTransform[i] = (verticesTransform[i] + 1) * 0.5 * width - 0.5;
+            // flip Y, NDC has +Y up, screen has +Y down
+            verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height - 0.5;
         } else {
             // at or behind the eye, reject
             verticesTransform[i] = NaN;
@@ -375,9 +378,6 @@ function render() {
         const i0 = trianglesTransform[i];
         const i1 = trianglesTransform[i + 1];
         const i2 = trianglesTransform[i + 2];
-        if (i0 < 0 || i1 < 0 || i2 < 0) {
-            continue;
-        }
         // get px coords
         const ax = verticesTransform[4 * i0];
         const ay = verticesTransform[4 * i0 + 1];
