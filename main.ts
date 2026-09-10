@@ -63,7 +63,7 @@ let tz = 0;
 // camera eye pos
 let cex = 0;
 let cey = 0;
-let cez = 1.5;
+let cez = 5;
 // camera target post
 let ctx = 0;
 let cty = 0;
@@ -142,8 +142,7 @@ let verticesTransformCount = 0;
 let trianglesTransformCount = 0;
 
 function render() {
-    // copy from model vertices and indicies
-
+    //// copy data from model vertices and indicies
     // make every vector 4 long instead of 3 long, have space for w for verticies
     for (let i = 0; i < vertices.length / 3; i ++) {
         verticesTransform[4 * i] = vertices[3 * i];
@@ -152,10 +151,11 @@ function render() {
         verticesTransform[4 * i + 3] = 1;
     }
     verticesTransformCount = vertices.length / 3;
-    for (let i = 0; i < triangles.length; i ++) {
-        trianglesTransform[i] = triangles[i];
-    }
-    trianglesTransformCount = triangles.length / 3;
+    // clipping will automatically fill this in properly
+    // for (let i = 0; i < triangles.length; i ++) {
+    //     trianglesTransform[i] = triangles[i];
+    // }
+    // trianglesTransformCount = triangles.length / 3;
 
     //// model to world coords
     // scale matrix
@@ -231,7 +231,7 @@ function render() {
     //// combined matrix
     const matrixMVC = matmul(matrixC, matmul(matrixV, matrixM));
     // apply combined matrix to vertices
-    for (let i = 0; i < verticesTransform.length; i += 4) {
+    for (let i = 0; i < verticesTransformCount * 4; i += 4) {
         const vertex = [
             [verticesTransform[i]],
             [verticesTransform[i + 1]],
@@ -244,9 +244,81 @@ function render() {
         verticesTransform[i + 2] = newVertex[2][0];
         verticesTransform[i + 3] = newVertex[3][0];
     }
-    //// perspective/actual clipping
+    //// fills trianglesTransform from triangles and clips
+    trianglesTransformCount = 0;
+
+    // append a new vertex on the segment ia->ib, exactly on the near plane.
+    // both are indices into verticesTransform, in CLIP SPACE (before divide).
+    function clipLerpNear(ia: number, ib: number): number {
+        const a = 4 * ia;
+        const b = 4 * ib;
+        const wa = verticesTransform[a + 3];
+        const wb = verticesTransform[b + 3];
+        const t = (wa - cn) / (wa - wb);
+
+        const o = 4 * verticesTransformCount;
+        verticesTransform[o] = verticesTransform[a] + t * (verticesTransform[b] - verticesTransform[a]);
+        verticesTransform[o + 1] = verticesTransform[a + 1] + t * (verticesTransform[b + 1] - verticesTransform[a + 1]);
+        verticesTransform[o + 2] = verticesTransform[a + 2] + t * (verticesTransform[b + 2] - verticesTransform[a + 2]);
+        verticesTransform[o + 3] = verticesTransform[a + 3] + t * (verticesTransform[b + 3] - verticesTransform[a + 3]);
+
+        return verticesTransformCount++;
+    }
+
+    function emitTriangle(a: number, b: number, c: number) {
+        const o = 3 * trianglesTransformCount;
+        trianglesTransform[o] = a;
+        trianglesTransform[o + 1] = b;
+        trianglesTransform[o + 2] = c;
+        trianglesTransformCount++;
+    }
+
+    for (let i = 0; i < triangles.length; i += 3) {
+        let a = triangles[i];
+        let b = triangles[i + 1];
+        let c = triangles[i + 2];
+
+        const inA = verticesTransform[4 * a + 3] >= cn;
+        const inB = verticesTransform[4 * b + 3] >= cn;
+        const inC = verticesTransform[4 * c + 3] >= cn;
+        const inCount = (inA ? 1 : 0) + (inB ? 1 : 0) + (inC ? 1 : 0);
+
+        // handle the four cases of triangles
+        // fully behind the near plane, skip
+        if (inCount == 0) {
+            continue;
+        }
+        // fully in the screen, easy
+        else if (inCount == 3) {
+            // add the triangle in completely normally
+            emitTriangle(a, b, c);
+        }
+        // two points outside, generate a new triangle
+        else if (inCount == 1) {
+            // rotate so `a` is the one inside. rotations preserve winding.
+            if (inB) {
+                const oa = a; a = b; b = c; c = oa;          // (a,b,c) -> (b,c,a)
+            } else if (inC) {
+                const oa = a, ob = b; a = c; b = oa; c = ob; // (a,b,c) -> (c,a,b)
+            }
+            emitTriangle(a, clipLerpNear(a, b), clipLerpNear(c, a));
+        }
+        // one point outside, generate two triangles
+        else /* if (inCount == 2) */ {
+            if (!inA) {
+                const oa = a; a = b; b = c; c = oa;
+            } else if (!inB) {
+                const oa = a, ob = b; a = c; b = oa; c = ob;
+            }
+            const bc = clipLerpNear(b, c);
+            const ca = clipLerpNear(c, a);
+            emitTriangle(a, b, bc);   // quad a, b, bc, ca
+            emitTriangle(a, bc, ca);  // fanned from a
+        }
+    }
+    //// perspective
     // apply to vertices
-    for (let i = 0; i < verticesTransform.length; i += 4) {
+    for (let i = 0; i < verticesTransformCount * 4; i += 4) {
         const vertex = [
             [verticesTransform[i]],
             [verticesTransform[i + 1]],
@@ -254,7 +326,7 @@ function render() {
             [verticesTransform[i + 3]],
         ];
         const w = vertex[3][0];
-        if (w >= cn) {
+        if (w > 0) {
             // now in NDC
             verticesTransform[i] = vertex[0][0] / w;
             verticesTransform[i + 1] = vertex[1][0] / w;
@@ -264,7 +336,6 @@ function render() {
             verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height;  // flip Y, NDC has +Y up, screen has +Y down
         } else {
             // at or behind the eye, reject
-            // todo must handle clipping properly, if any point outside of camera screen gets cooked
             verticesTransform[i] = NaN;
             verticesTransform[i + 1] = NaN;
             verticesTransform[i + 2] = NaN;
@@ -273,7 +344,7 @@ function render() {
     }
     //// wireframe draw!!!
     // draw triangles out
-    for (let i = 0; i < trianglesTransform.length; i += 3) {
+    for (let i = 0; i < trianglesTransformCount * 3; i += 3) {
         // fetch vertex indices
         const i0 = trianglesTransform[i];
         const i1 = trianglesTransform[i + 1];
@@ -285,7 +356,6 @@ function render() {
         const by = verticesTransform[4 * i1 + 1];
         const cx = verticesTransform[4 * i2];
         const cy = verticesTransform[4 * i2 + 1];
-        // for now skip if any NaN
         if (ax !== ax || ay !== ay || bx !== bx || by !== by || cx !== cx || cy !== cy) {
             continue;
         }
