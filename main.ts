@@ -14,7 +14,7 @@ const vertices = [
     -1, 1, 1    // 7  front top    left
 ];
 // 12 triangles, 3 indices each, CCW from outside
-const indices = [
+const triangles = [
     // front  (+Z)
     4, 5, 6,
     4, 6, 7,
@@ -63,7 +63,7 @@ let tz = 0;
 // camera eye pos
 let cex = 0;
 let cey = 0;
-let cez = 5;
+let cez = 1.5;
 // camera target post
 let ctx = 0;
 let cty = 0;
@@ -136,16 +136,26 @@ function matmul(m1: number[][], m2: number[][]): number[][] {
 
 // init a new vertices array that has fourth element w
 const verticesTransform: number[] = [];
+const trianglesTransform: number[] = [];
+
+let verticesTransformCount = 0;
+let trianglesTransformCount = 0;
 
 function render() {
-    // reinit from model verticesTransform
-    // make every vector 4 long instead of 3 long, have space for w
+    // copy from model vertices and indicies
+
+    // make every vector 4 long instead of 3 long, have space for w for verticies
     for (let i = 0; i < vertices.length / 3; i ++) {
         verticesTransform[4 * i] = vertices[3 * i];
         verticesTransform[4 * i + 1] = vertices[3 * i + 1];
         verticesTransform[4 * i + 2] = vertices[3 * i + 2];
         verticesTransform[4 * i + 3] = 1;
     }
+    verticesTransformCount = vertices.length / 3;
+    for (let i = 0; i < triangles.length; i ++) {
+        trianglesTransform[i] = triangles[i];
+    }
+    trianglesTransformCount = triangles.length / 3;
 
     //// model to world coords
     // scale matrix
@@ -244,7 +254,7 @@ function render() {
             [verticesTransform[i + 3]],
         ];
         const w = vertex[3][0];
-        if (w > 0) {
+        if (w >= cn) {
             // now in NDC
             verticesTransform[i] = vertex[0][0] / w;
             verticesTransform[i + 1] = vertex[1][0] / w;
@@ -263,11 +273,11 @@ function render() {
     }
     //// wireframe draw!!!
     // draw triangles out
-    for (let i = 0; i < indices.length; i += 3) {
+    for (let i = 0; i < trianglesTransform.length; i += 3) {
         // fetch vertex indices
-        const i0 = indices[i];
-        const i1 = indices[i + 1];
-        const i2 = indices[i + 2];
+        const i0 = trianglesTransform[i];
+        const i1 = trianglesTransform[i + 1];
+        const i2 = trianglesTransform[i + 2];
         // get px coords
         const ax = verticesTransform[4 * i0];
         const ay = verticesTransform[4 * i0 + 1];
@@ -287,9 +297,10 @@ function render() {
 }
 
 game.onUpdate(() => {
-    picture.fill(0);
-    rx = game.runtime() / 4000 * Math.PI;
+    // rx = game.runtime() / 4000 * Math.PI;
     ry = game.runtime() / 4000 * Math.PI;
-    rz = game.runtime() / 4000 * Math.PI;
+    // rz = game.runtime() / 4000 * Math.PI;
+
+    picture.fill(0);
     render();
 });
