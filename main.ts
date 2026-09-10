@@ -206,8 +206,13 @@ function render() {
     // basis construction
     const eye = [cex, cey, cez];
     const target = [ctx, cty, ctz];
-    const up = [0, 1, 0];
+    let up = [0, 1, 0];
     const zAxis = vectornormalize(vectorsub(eye, target));
+    // if the view direction is (nearly) parallel to `up`, cross(up, zAxis) ~ 0
+    // and normalize blows up. Swap to a different reference up for this case.
+    if (Math.abs(zAxis[1]) > 0.999) {
+        up = [0, 0, 1];
+    }
     const xAxis = vectornormalize(vectorcross3(up, zAxis));
     const yAxis = vectorcross3(zAxis, xAxis);
     // matrix for world to camera (view matrix)
