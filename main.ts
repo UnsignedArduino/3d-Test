@@ -114,6 +114,13 @@ function vectorcross3(v1: number[], v2: number[]): number[] {
     ];
 }
 
+// determinant of the upper-left 3x3 (works on your 4x4 row arrays)
+function det3(m: number[][]): number {
+    return m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+        - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+        + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]);
+}
+
 function matmul(m1: number[][], m2: number[][]): number[][] {
     const result = [];
     // i is the row index for m1
@@ -234,7 +241,12 @@ function render() {
         [0, 0, -1, 0]
     ];
     //// combined matrix
-    const matrixMVC = matmul(matrixC, matmul(matrixV, matrixM));
+    // const matrixMVC = matmul(matrixC, matmul(matrixV, matrixM));
+    const matrixMV = matmul(matrixV, matrixM);
+    const matrixMVC = matmul(matrixC, matrixMV);
+    // determinant of the top left 3x3 of the MV matrix tells if all the scaling done
+    // turns it inside out or not, important for backface culling and other stuff idk
+    const mirrored = det3(matrixMV) < 0;
     // apply combined matrix to vertices
     for (let i = 0; i < verticesTransformCount * 4; i += 4) {
         const vertex = [
@@ -282,8 +294,8 @@ function render() {
 
     for (let i = 0; i < triangles.length; i += 3) {
         let a = triangles[i];
-        let b = triangles[i + 1];
-        let c = triangles[i + 2];
+        let b = mirrored ? triangles[i + 2] : triangles[i + 1];
+        let c = mirrored ? triangles[i + 1] : triangles[i + 2];
 
         const inA = verticesTransform[4 * a + 3] >= cn;
         const inB = verticesTransform[4 * b + 3] >= cn;
@@ -344,7 +356,6 @@ function render() {
         // console.log(`${verticesTransform[0]}, ${verticesTransform[1]}, ${verticesTransform[2]}`);
     }
     //// backface cull
-    // todo: sx = -1 or similar may make it disappear, fix later
     let newTrianglesTransformCount = 0;
     for (let i = 0; i < trianglesTransformCount * 3; i += 3) {
         // fetch vertex indices
@@ -391,9 +402,14 @@ function render() {
 }
 
 game.onUpdate(() => {
-    rx = game.runtime() / 4000 * Math.PI;
-    ry = game.runtime() / 4000 * Math.PI;
-    rz = game.runtime() / 4000 * Math.PI;
+    // rx = game.runtime() / 4000 * Math.PI;
+    // ry = game.runtime() / 4000 * Math.PI;
+    // rz = game.runtime() / 4000 * Math.PI;
+    ry = Math.PI / 6;
+    rx = Math.PI / 6;
+    sx = 2 * Math.cos(game.runtime() / 8000 * Math.PI);
+    sy = 2 * Math.cos((game.runtime() + 2000) / 8000 * Math.PI);
+    sz = 2 * Math.cos((game.runtime() + 4000) / 8000 * Math.PI);
 
     picture.fill(0);
     render();
