@@ -275,7 +275,6 @@ namespace Testing3D {
 
         private _verticesBufCount: number = 0;
         private _trianglesBufCount: number = 0;
-        private _materialsBufCount: number = 0;
 
         public constructor(target: Image) {
             this.target = target;
@@ -299,7 +298,14 @@ namespace Testing3D {
                 this._verticesBuf[4 * i + 3] = 1;
             }
             this._verticesBufCount = model.mesh.vertices.length / 3;
-            // _trianglesBuf and materialsBuf is handled later in the pipeline
+
+            for (let i = 0; i < model.mesh.triangles.length; i ++) {
+                this._trianglesBuf[i] = model.mesh.triangles[i];
+            }
+            this._trianglesBufCount = model.mesh.triangles.length / 3;
+            for (let i = 0; i < model.mesh.materials.length; i++) {
+                this._materialsBuf[i] = model.mesh.materials[i];
+            }
 
             //// apply MVC to vertices
             const matrixM = model.transform.matrixM;
@@ -319,59 +325,17 @@ namespace Testing3D {
                 this._verticesBuf[i + 3] = newVertex[3][0];
             }
             const mirrored = LinearAlgebra.det3(matrixM) < 0;
-
-            //// fills _trianglesBuf from triangles and clips; fills _materialsBuf
-            this._trianglesBufCount = 0;
-            this._materialsBufCount = 0;
-            for (let i = 0; i < model.mesh.triangles.length; i += 3) {
-                let a = model.mesh.triangles[i];
-                let b = mirrored ? model.mesh.triangles[i + 2] : model.mesh.triangles[i + 1];
-                let c = mirrored ? model.mesh.triangles[i + 1] : model.mesh.triangles[i + 2];
-                const color = model.mesh.materials[i / 3];
-
-                const inA = this._nearDist(a) >= 0;
-                const inB = this._nearDist(b) >= 0;
-                const inC = this._nearDist(c) >= 0;
-                const inCount = (inA ? 1 : 0) + (inB ? 1 : 0) + (inC ? 1 : 0);
-
-                // handle the four cases of triangles
-                // fully behind the near plane, skip
-                if (inCount == 0) {
-                    continue;
-                }
-                // fully in the screen, easy
-                else if (inCount == 3) {
-                    // add the triangle in completely normally
-                    this._emitTriangle(a, b, c, color);
-                }
-                // two points outside, generate a new triangle
-                else if (inCount == 1) {
-                    // rotate so `a` is the one inside. rotations preserve winding.
-                    if (inB) {
-                        const oa = a; a = b; b = c; c = oa;          // (a,b,c) -> (b,c,a)
-                    } else if (inC) {
-                        const oa = a, ob = b; a = c; b = oa; c = ob; // (a,b,c) -> (c,a,b)
-                    }
-                    this._emitTriangle(
-                        a, 
-                        this._clipLerpNear(a, b),
-                        this._clipLerpNear(c, a),
-                        color
-                    );
-                }
-                // one point outside, generate two triangles
-                else /* if (inCount == 2) */ {
-                    if (!inA) {
-                        const oa = a; a = b; b = c; c = oa;
-                    } else if (!inB) {
-                        const oa = a, ob = b; a = c; b = oa; c = ob;
-                    }
-                    const bc = this._clipLerpNear(b, c);
-                    const ca = this._clipLerpNear(c, a);
-                    this._emitTriangle(a, b, bc, color);   // quad a, b, bc, ca
-                    this._emitTriangle(a, bc, ca, color);  // fanned from a
+            if (mirrored) {
+                for (let t = 0; t < this._trianglesBufCount; t++) {
+                    const tmp = this._trianglesBuf[3 * t + 1];
+                    this._trianglesBuf[3 * t + 1] = this._trianglesBuf[3 * t + 2];
+                    this._trianglesBuf[3 * t + 2] = tmp;
                 }
             }
+            
+            //// clipping
+            this._clipForPlane(0);  // near
+            this._clipForPlane(1);  // far
 
             //// perspective
             // apply to vertices
@@ -419,7 +383,6 @@ namespace Testing3D {
                 }
             }
             this._trianglesBufCount = newTrianglesBufCount;
-            this._materialsBufCount = newTrianglesBufCount;
 
             //// triangle drawing
             for (let i = 0; i < this._trianglesBufCount * 3; i += 3) {
@@ -444,20 +407,32 @@ namespace Testing3D {
             }
         }
 
-        // signed distance to the near plane in clip space; >= 0 means inside (z_ndc >= -1)
-        private _nearDist(i: number): number {
-            return this._verticesBuf[4 * i + 2] + this._verticesBuf[4 * i + 3];
+        // inside when a*x + b*y + c*z + d*w >= 0
+        private PLANES = [
+            0, 0, 1, 1,   // near: z >= -w
+            0, 0, -1, 1,   // far:  z <=  w
+        ];
+
+        private _dist(i: number, p: number): number {
+            const v = this._verticesBuf, o = 4 * i;
+            const q = p * 4;
+            return (
+                this.PLANES[q] * v[o] + 
+                this.PLANES[q + 1] * v[o + 1] + 
+                this.PLANES[q + 2] * v[o + 2] + 
+                this.PLANES[q + 3] * v[o + 3]
+            );
         }
 
-        // append a new vertex on the segment ia->ib, exactly on the near plane.
-        // both are indices into _verticesBuf, in CLIP SPACE (before divide).
-        private _clipLerpNear(ia: number, ib: number): number {
-            if (ia > ib) { const t = ia; ia = ib; ib = t; }
-
+        private _clipLerp(ia: number, ib: number, p: number): number {
+            let da = this._dist(ia, p);
+            let db = this._dist(ib, p);
+            if (da < 0) { // make ia the inside vertex so both neighbours of an edge compute the same point
+                const ti = ia; ia = ib; ib = ti;
+                const td = da; da = db; db = td;
+            }
             const a = 4 * ia;
             const b = 4 * ib;
-            const da = this._nearDist(ia);
-            const db = this._nearDist(ib);
             const t = da / (da - db);
 
             const o = 4 * this._verticesBufCount;
@@ -470,12 +445,76 @@ namespace Testing3D {
         }
 
         private _emitTriangle(a: number, b: number, c: number, color: number) {
-            const o = 3 * this._trianglesBufCount;
-            this._trianglesBuf[o] = a;
-            this._trianglesBuf[o + 1] = b;
-            this._trianglesBuf[o + 2] = c;
-            this._trianglesBufCount++;
-            this._materialsBuf[this._materialsBufCount++] = color;
+            const t = this._trianglesBufCount++;
+            this._trianglesBuf[3 * t] = a;
+            this._trianglesBuf[3 * t + 1] = b;
+            this._trianglesBuf[3 * t + 2] = c;
+            this._materialsBuf[t] = color;   // materials indexed by triangle number
+        }
+
+        private _clipForPlane(p: number) {
+            const originalTriangleCount = this._trianglesBufCount;
+            for (let i = 0; i < originalTriangleCount; i++) {
+                let a = this._trianglesBuf[3 * i];
+                let b = this._trianglesBuf[3 * i + 1];
+                let c = this._trianglesBuf[3 * i + 2];
+                const color = this._materialsBuf[i];
+
+                const inA = this._dist(a, p) >= 0;
+                const inB = this._dist(b, p) >= 0;
+                const inC = this._dist(c, p) >= 0;
+                const inCount = (inA ? 1 : 0) + (inB ? 1 : 0) + (inC ? 1 : 0);
+
+                // handle the four cases of triangles
+                // fully behind the near plane, skip
+                if (inCount == 0) {
+                    continue;
+                }
+                // fully in the screen, easy
+                else if (inCount == 3) {
+                    // add the triangle in completely normally
+                    this._emitTriangle(a, b, c, color);
+                }
+                // two points outside, generate a new triangle
+                else if (inCount == 1) {
+                    // rotate so `a` is the one inside. rotations preserve winding.
+                    if (inB) {
+                        const oa = a; a = b; b = c; c = oa;          // (a,b,c) -> (b,c,a)
+                    } else if (inC) {
+                        const oa = a, ob = b; a = c; b = oa; c = ob; // (a,b,c) -> (c,a,b)
+                    }
+                    this._emitTriangle(
+                        a,
+                        this._clipLerp(a, b, p),
+                        this._clipLerp(c, a, p),
+                        color
+                    );
+                }
+                // one point outside, generate two triangles
+                else /* if (inCount == 2) */ {
+                    if (!inA) {
+                        const oa = a; a = b; b = c; c = oa;
+                    } else if (!inB) {
+                        const oa = a, ob = b; a = c; b = oa; c = ob;
+                    }
+                    const bc = this._clipLerp(b, c, p);
+                    const ca = this._clipLerp(c, a, p);
+                    this._emitTriangle(a, b, bc, color);   // quad a, b, bc, ca
+                    this._emitTriangle(a, bc, ca, color);  // fanned from a
+                }
+            }
+
+            // move this pass's output [end, count) down to [0, count - end).
+            // dst index is always below src, so copying forward never clobbers unread data.
+            const n = this._trianglesBufCount - originalTriangleCount;
+            for (let t = 0; t < n; t++) {
+                const s = 3 * (originalTriangleCount + t), d = 3 * t;
+                this._trianglesBuf[d] = this._trianglesBuf[s];
+                this._trianglesBuf[d + 1] = this._trianglesBuf[s + 1];
+                this._trianglesBuf[d + 2] = this._trianglesBuf[s + 2];
+                this._materialsBuf[t] = this._materialsBuf[originalTriangleCount + t];
+            }
+            this._trianglesBufCount = n;
         }
     }
 }
