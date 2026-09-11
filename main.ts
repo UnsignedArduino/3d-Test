@@ -583,7 +583,11 @@ const cubeMesh = new Testing3D.Mesh()
 cubeMesh.vertices = VERTICES;
 cubeMesh.triangles = TRIANGLES;
 cubeMesh.materials = MATERIALS;
-const cubeModel = new Testing3D.Model(cubeMesh);
+
+const cubeModel1 = new Testing3D.Model(cubeMesh);
+cubeModel1.transform.translation = [-1, 0, 0];
+const cubeModel2 = new Testing3D.Model(cubeMesh);
+cubeModel2.transform.translation = [1, 0, 0];
 
 const camera = new Testing3D.Camera([0, 0, 10], [0, 0, 0], aspect);
 camera.fovY = 70 * Math.PI / 180;
@@ -591,15 +595,19 @@ camera.near = 0.1;
 camera.far = 100;
 
 const modelScene = new Testing3D.Scene();
-modelScene.models.push(cubeModel);
+modelScene.models.push(cubeModel1);
+modelScene.models.push(cubeModel2);
 
 const renderer = new Testing3D.Renderer(picture);
 
 game.onUpdate(() => {
-    cubeModel.transform.rotation = [
-        game.runtime() / 4000 * Math.PI,
-        game.runtime() / 4000 * Math.PI,
-        game.runtime() / 4000 * Math.PI
-    ];
+    cubeModel1.transform.rotation[0] = game.runtime() / 4000 * Math.PI;
+    cubeModel1.transform.rotation[1] = game.runtime() / 4000 * Math.PI;
+    cubeModel1.transform.rotation[2] = game.runtime() / 4000 * Math.PI;
+
+    cubeModel2.transform.rotation[0] = game.runtime() / 4000 * -Math.PI;
+    cubeModel2.transform.rotation[1] = game.runtime() / 4000 * -Math.PI;
+    cubeModel2.transform.rotation[2] = game.runtime() / 4000 * -Math.PI;
+
     renderer.render(modelScene, camera);
 });
