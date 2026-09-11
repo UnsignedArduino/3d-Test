@@ -40,6 +40,22 @@ const triangles = [
     0, 5, 4
 ];
 
+// for every triangle, what color is it
+const materials = [
+    2, 
+    2, 
+    3, 
+    3, 
+    4, 
+    4, 
+    5, 
+    5, 
+    6, 
+    6,
+    7,
+    7
+];
+
 const width = scene.screenWidth();
 const height = scene.screenHeight();
 const aspect = width / height;
@@ -144,9 +160,11 @@ function matmul(m1: number[][], m2: number[][]): number[][] {
 // init a new vertices array that has fourth element w
 const verticesTransform: number[] = [];
 const trianglesTransform: number[] = [];
+const materialsTransform: number[] = [];
 
 let verticesTransformCount = 0;
 let trianglesTransformCount = 0;
+let materialsTransformCount = 0;
 
 function render() {
     //// copy data from model vertices and indicies
@@ -158,11 +176,7 @@ function render() {
         verticesTransform[4 * i + 3] = 1;
     }
     verticesTransformCount = vertices.length / 3;
-    // clipping will automatically fill this in properly
-    // for (let i = 0; i < triangles.length; i ++) {
-    //     trianglesTransform[i] = triangles[i];
-    // }
-    // trianglesTransformCount = triangles.length / 3;
+    // trianglesTransform and materialsTransform is handled later in the pipeline
 
     //// model to world coords
     // scale matrix
@@ -263,6 +277,7 @@ function render() {
     }
     //// fills trianglesTransform from triangles and clips
     trianglesTransformCount = 0;
+    materialsTransformCount = 0;
 
     // append a new vertex on the segment ia->ib, exactly on the near plane.
     // both are indices into verticesTransform, in CLIP SPACE (before divide).
@@ -284,18 +299,20 @@ function render() {
         return verticesTransformCount++;
     }
 
-    function emitTriangle(a: number, b: number, c: number) {
+    function emitTriangle(a: number, b: number, c: number, color: number) {
         const o = 3 * trianglesTransformCount;
         trianglesTransform[o] = a;
         trianglesTransform[o + 1] = b;
         trianglesTransform[o + 2] = c;
         trianglesTransformCount++;
+        materialsTransform[materialsTransformCount++] = color;
     }
 
     for (let i = 0; i < triangles.length; i += 3) {
         let a = triangles[i];
         let b = mirrored ? triangles[i + 2] : triangles[i + 1];
         let c = mirrored ? triangles[i + 1] : triangles[i + 2];
+        const color = materials[i / 3];
 
         const inA = verticesTransform[4 * a + 3] >= cn;
         const inB = verticesTransform[4 * b + 3] >= cn;
@@ -310,7 +327,7 @@ function render() {
         // fully in the screen, easy
         else if (inCount == 3) {
             // add the triangle in completely normally
-            emitTriangle(a, b, c);
+            emitTriangle(a, b, c, color);
         }
         // two points outside, generate a new triangle
         else if (inCount == 1) {
@@ -320,7 +337,7 @@ function render() {
             } else if (inC) {
                 const oa = a, ob = b; a = c; b = oa; c = ob; // (a,b,c) -> (c,a,b)
             }
-            emitTriangle(a, clipLerpNear(a, b), clipLerpNear(c, a));
+            emitTriangle(a, clipLerpNear(a, b), clipLerpNear(c, a), color);
         }
         // one point outside, generate two triangles
         else /* if (inCount == 2) */ {
@@ -331,8 +348,8 @@ function render() {
             }
             const bc = clipLerpNear(b, c);
             const ca = clipLerpNear(c, a);
-            emitTriangle(a, b, bc);   // quad a, b, bc, ca
-            emitTriangle(a, bc, ca);  // fanned from a
+            emitTriangle(a, b, bc, color);   // quad a, b, bc, ca
+            emitTriangle(a, bc, ca, color);  // fanned from a
         }
     }
     //// perspective
@@ -376,10 +393,12 @@ function render() {
             trianglesTransform[3 * newTrianglesTransformCount] = i0;
             trianglesTransform[3 * newTrianglesTransformCount + 1] = i1;
             trianglesTransform[3 * newTrianglesTransformCount + 2] = i2;
-            newTrianglesTransformCount ++;
+            materialsTransform[newTrianglesTransformCount] = materialsTransform[i / 3];
+            newTrianglesTransformCount++;
         }
     }
     trianglesTransformCount = newTrianglesTransformCount;
+    materialsTransformCount = newTrianglesTransformCount;
     //// wireframe draw!!!
     // draw triangles out
     for (let i = 0; i < trianglesTransformCount * 3; i += 3) {
@@ -394,23 +413,21 @@ function render() {
         const by = verticesTransform[4 * i1 + 1];
         const cx = verticesTransform[4 * i2];
         const cy = verticesTransform[4 * i2 + 1];
+        // get flat color for now
+        const c = materialsTransform[i / 3];
         // draw triangle!
-        picture.drawLine(ax, ay, bx, by, 1);
-        picture.drawLine(bx, by, cx, cy, 1);
-        picture.drawLine(cx, cy, ax, ay, 1);
+        // picture.drawLine(ax, ay, bx, by, c);
+        // picture.drawLine(bx, by, cx, cy, c);
+        // picture.drawLine(cx, cy, ax, ay, c);
+        picture.fillTriangle(ax, ay, bx, by, cx, cy, c);
     }
 }
 
 game.onUpdate(() => {
-    // rx = game.runtime() / 4000 * Math.PI;
-    // ry = game.runtime() / 4000 * Math.PI;
-    // rz = game.runtime() / 4000 * Math.PI;
-    ry = Math.PI / 6;
-    rx = Math.PI / 6;
-    sx = 2 * Math.cos(game.runtime() / 8000 * Math.PI);
-    sy = 2 * Math.cos((game.runtime() + 2000) / 8000 * Math.PI);
-    sz = 2 * Math.cos((game.runtime() + 4000) / 8000 * Math.PI);
-
+    rx = game.runtime() / 4000 * Math.PI;
+    ry = game.runtime() / 4000 * Math.PI;
+    rz = game.runtime() / 4000 * Math.PI;
+    
     picture.fill(0);
     render();
 });
