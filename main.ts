@@ -333,21 +333,14 @@ function render() {
             [verticesTransform[i + 3]],
         ];
         const w = vertex[3][0];
-        if (w > 0) {
-            // now in NDC
-            verticesTransform[i] = vertex[0][0] / w;
-            verticesTransform[i + 1] = vertex[1][0] / w;
-            verticesTransform[i + 2] = vertex[2][0] / w;
-            // convert X and Y to screen coords, Z still in NDC (-1 near, 1 far plane)
-            verticesTransform[i] = (verticesTransform[i] + 1) * 0.5 * width - 0.5;
-            // flip Y, NDC has +Y up, screen has +Y down
-            verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height - 0.5;
-        } else {
-            // at or behind the eye, reject
-            verticesTransform[i] = NaN;
-            verticesTransform[i + 1] = NaN;
-            verticesTransform[i + 2] = NaN;
-        }
+        // now in NDC
+        verticesTransform[i] = vertex[0][0] / w;
+        verticesTransform[i + 1] = vertex[1][0] / w;
+        verticesTransform[i + 2] = vertex[2][0] / w;
+        // convert X and Y to screen coords, Z still in NDC (-1 near, 1 far plane)
+        verticesTransform[i] = (verticesTransform[i] + 1) * 0.5 * width - 0.5;
+        // flip Y, NDC has +Y up, screen has +Y down
+        verticesTransform[i + 1] = (1 - verticesTransform[i + 1]) * 0.5 * height - 0.5;
         // console.log(`${verticesTransform[0]}, ${verticesTransform[1]}, ${verticesTransform[2]}`);
     }
     //// backface cull
@@ -390,9 +383,6 @@ function render() {
         const by = verticesTransform[4 * i1 + 1];
         const cx = verticesTransform[4 * i2];
         const cy = verticesTransform[4 * i2 + 1];
-        if (ax !== ax || ay !== ay || bx !== bx || by !== by || cx !== cx || cy !== cy) {
-            continue;
-        }
         // draw triangle!
         picture.drawLine(ax, ay, bx, by, 1);
         picture.drawLine(bx, by, cx, cy, 1);
