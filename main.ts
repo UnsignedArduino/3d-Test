@@ -5,6 +5,23 @@ game.stats = true;
 // todo: better name then "Testing3D"
 namespace Testing3D {
     namespace LinearAlgebra {
+        // copies src into snap at offset; returns true if any value differed
+        export function syncSnapshot(snap: number[], offset: number, src: number[] | number): boolean {
+            let changed = false;
+            if (typeof src === "number") {
+                changed = snap[offset] !== src;
+                snap[offset] = src;
+            } else {
+                for (let i = 0; i < src.length; i++) {
+                    if (snap[offset + i] !== src[i]) {
+                        snap[offset + i] = src[i];
+                        changed = true;
+                    }
+                }
+            }
+            return changed;
+        }
+
         export function vectorsub(v1: number[], v2: number[]): number[] {
             const result = [];
             for (let i = 0; i < v1.length; i++) {
@@ -13,7 +30,7 @@ namespace Testing3D {
             return result;
         }
 
-        export function vectordistance(v: number[]): number {
+        export function vectorlength(v: number[]): number {
             let sumOfSquares = 0;
             for (let i = 0; i < v.length; i++) {
                 sumOfSquares += v[i] ** 2;
@@ -23,7 +40,7 @@ namespace Testing3D {
 
         export function vectornormalize(v: number[]): number[] {
             const result = [];
-            const dist = vectordistance(v);
+            const dist = vectorlength(v);
             for (let i = 0; i < v.length; i++) {
                 result.push(v[i] / dist);
             }
@@ -80,45 +97,14 @@ namespace Testing3D {
     }
 
     export class Transform {
-        private _scale: number[];
-        private _rotation: number[];
-        private _translation: number[];
+        public scale: number[] = [1, 1, 1];
+        public rotation: number[] = [0, 0, 0];
+        public translation: number[] = [0, 0, 0];
 
-        private _matricesDirty: boolean = true;
+        private _builtFrom: number[] = [];
         private _matrixM: number[][];
 
-        public constructor() {
-            this.scale = [1, 1, 1];
-            this.rotation = [0, 0, 0];
-            this.translation = [0, 0, 0];
-        }
-
-        public get scale(): number[] {
-            return this._scale;
-        }
-
-        public set scale(s: number[]) {
-            this._scale = s;
-            this._matricesDirty = true;
-        }
-
-        public get rotation(): number[] {
-            return this._rotation;
-        }
-        
-        public set rotation(r: number[]) {
-            this._rotation = r;
-            this._matricesDirty = true;
-        }
-
-        public get translation(): number[] {
-            return this._translation;
-        }
-
-        public set translation(t: number[]) {
-            this._translation = t;
-            this._matricesDirty = true;
-        }
+        public constructor() {}
 
         private _recomputeMatrices() {
             const sx = this.scale[0];
@@ -174,8 +160,11 @@ namespace Testing3D {
         }
 
         public get matrixM(): number[][] {
-            if (this._matricesDirty) {
-                this._matricesDirty = false;
+            // call each sync first, then ||, so every snapshot gets updated
+            let changed = LinearAlgebra.syncSnapshot(this._builtFrom, 0, this.scale);
+            changed = LinearAlgebra.syncSnapshot(this._builtFrom, 3, this.rotation) || changed;
+            changed = LinearAlgebra.syncSnapshot(this._builtFrom, 6, this.translation) || changed;
+            if (changed) {
                 this._recomputeMatrices();
             }
             return this._matrixM;
@@ -194,42 +183,24 @@ namespace Testing3D {
 
     export class Camera {
         // for view matrix
-        private _eye: number[];
-        private _target: number[];
+        public eye: number[];
+        public target: number[];
 
-        private _matrixVDirty = true;
+        private _viewBuiltFrom: number[] = [];
         private _matrixV: number[][];
         // for clip space matrix
-        private _fovY: number = 70 * Math.PI / 180;
-        private _aspect: number;
-        private _near: number = 0.1;
-        private _far: number = 100;
+        public fovY: number = 70 * Math.PI / 180;
+        public aspectRatio: number;
+        public near: number = 0.1;
+        public far: number = 100;
 
-        private _matrixCDirty = true;
+        private _clipBuiltFrom: number[] = [];
         private _matrixC: number[][];
 
         public constructor(eye: number[], target: number[], aspectRatio: number) {
             this.eye = eye;
             this.target = target;
             this.aspectRatio = aspectRatio;
-        }
-
-        public get eye(): number[] {
-            return this._eye;
-        }
-
-        public set eye(e: number[]) {
-            this._eye = e;
-            this._matrixVDirty = true;
-        }
-
-        public get target(): number[] {
-            return this._target;
-        }
-
-        public set target(t: number[]) {
-            this._target = t;
-            this._matrixVDirty = true;
         }
 
         private _recomputeVMatrix() {
@@ -252,52 +223,18 @@ namespace Testing3D {
         }
 
         public get matrixV(): number[][] {
-            if (this._matrixVDirty) {
-                this._matrixVDirty = false;
+            let changed = LinearAlgebra.syncSnapshot(this._viewBuiltFrom, 0, this.eye);
+            changed = LinearAlgebra.syncSnapshot(this._viewBuiltFrom, 3, this.target) || changed;
+            if (changed) {
                 this._recomputeVMatrix();
             }
             return this._matrixV;
         }
 
-        public get fovY(): number {
-            return this._fovY;
-        }
-
-        public set fovY(fy: number) {
-            this._fovY = fy;
-            this._matrixCDirty = true;
-        }
-
         // public set fovX(fx: number) {
-        //     this._fovY = 2 * Math.atan(Math.tan(fx / 2) / aspect);
+        //     this._fovY = 2 * Math.atan(Math.tan(fx / 2) / this.aspectRatio);
         // }
-
-        public get aspectRatio(): number {
-            return this._aspect;
-        }
-
-        public set aspectRatio(aspect: number) {
-            this._aspect = aspect;
-            this._matrixCDirty = true;
-        }
-
-        public get near(): number {
-            return this._near;
-        }
-
-        public set near(n: number) {
-            this._near = n;
-            this._matrixCDirty = true;
-        }
-
-        public get far(): number {
-            return this._far;
-        }
-
-        public set far(f: number) {
-            this._far = f;
-            this._matrixCDirty = true;
-        }
+        // and add getter
 
         private _recomputeCMatrix() {
             const f = 1 / Math.tan(this.fovY / 2);
@@ -312,8 +249,11 @@ namespace Testing3D {
         }
 
         public get matrixC(): number[][] {
-            if (this._matrixCDirty) {
-                this._matrixCDirty = false;
+            let changed = LinearAlgebra.syncSnapshot(this._clipBuiltFrom, 0, this.fovY);
+            changed = LinearAlgebra.syncSnapshot(this._clipBuiltFrom, 1, this.aspectRatio) || changed;
+            changed = LinearAlgebra.syncSnapshot(this._clipBuiltFrom, 2, this.near) || changed;
+            changed = LinearAlgebra.syncSnapshot(this._clipBuiltFrom, 3, this.far) || changed;
+            if (changed) {
                 this._recomputeCMatrix();
             }
             return this._matrixC;
@@ -389,9 +329,9 @@ namespace Testing3D {
                 let c = mirrored ? model.mesh.triangles[i + 1] : model.mesh.triangles[i + 2];
                 const color = model.mesh.materials[i / 3];
 
-                const inA = this._verticesBuf[4 * a + 3] >= near;
-                const inB = this._verticesBuf[4 * b + 3] >= near;
-                const inC = this._verticesBuf[4 * c + 3] >= near;
+                const inA = this._nearDist(a) >= 0;
+                const inB = this._nearDist(b) >= 0;
+                const inC = this._nearDist(c) >= 0;
                 const inCount = (inA ? 1 : 0) + (inB ? 1 : 0) + (inC ? 1 : 0);
 
                 // handle the four cases of triangles
@@ -451,7 +391,6 @@ namespace Testing3D {
                 this._verticesBuf[i] = (this._verticesBuf[i] + 1) * 0.5 * this.target.width - 0.5;
                 // flip Y, NDC has +Y up, screen has +Y down
                 this._verticesBuf[i + 1] = (1 - this._verticesBuf[i + 1]) * 0.5 * this.target.height - 0.5;
-                // console.log(`${verticesTransform[0]}, ${verticesTransform[1]}, ${verticesTransform[2]}`);
             }
 
             //// backface cull
@@ -497,24 +436,29 @@ namespace Testing3D {
                 const cy = this._verticesBuf[4 * i2 + 1];
                 // get material (flat color for now)
                 const c = this._materialsBuf[i / 3];
-                // picture.drawLine(ax, ay, bx, by, c);
-                // picture.drawLine(bx, by, cx, cy, c);
-                // picture.drawLine(cx, cy, ax, ay, c);
+                // this.target.drawLine(ax, ay, bx, by, c);
+                // this.target.drawLine(bx, by, cx, cy, c);
+                // this.target.drawLine(cx, cy, ax, ay, c);
                 // fill triangles TODO Z BUFFER
                 this.target.fillTriangle(ax, ay, bx, by, cx, cy, c);
             }
         }
 
+        // signed distance to the near plane in clip space; >= 0 means inside (z_ndc >= -1)
+        private _nearDist(i: number): number {
+            return this._verticesBuf[4 * i + 2] + this._verticesBuf[4 * i + 3];
+        }
+
         // append a new vertex on the segment ia->ib, exactly on the near plane.
-        // both are indices into verticesTransform, in CLIP SPACE (before divide).
+        // both are indices into _verticesBuf, in CLIP SPACE (before divide).
         private _clipLerpNear(ia: number, ib: number, near: number): number {
             if (ia > ib) { const t = ia; ia = ib; ib = t; }
 
             const a = 4 * ia;
             const b = 4 * ib;
-            const wa = this._verticesBuf[a + 3];
-            const wb = this._verticesBuf[b + 3];
-            const t = (wa - near) / (wa - wb);
+            const da = this._nearDist(ia);
+            const db = this._nearDist(ib);
+            const t = da / (da - db);
 
             const o = 4 * this._verticesBufCount;
             this._verticesBuf[o] = this._verticesBuf[a] + t * (this._verticesBuf[b] - this._verticesBuf[a]);
