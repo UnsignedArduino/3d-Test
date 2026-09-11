@@ -354,8 +354,8 @@ namespace Testing3D {
                     }
                     this._emitTriangle(
                         a, 
-                        this._clipLerpNear(a, b, near),
-                        this._clipLerpNear(c, a, near),
+                        this._clipLerpNear(a, b),
+                        this._clipLerpNear(c, a),
                         color
                     );
                 }
@@ -366,8 +366,8 @@ namespace Testing3D {
                     } else if (!inB) {
                         const oa = a, ob = b; a = c; b = oa; c = ob;
                     }
-                    const bc = this._clipLerpNear(b, c, near);
-                    const ca = this._clipLerpNear(c, a, near);
+                    const bc = this._clipLerpNear(b, c);
+                    const ca = this._clipLerpNear(c, a);
                     this._emitTriangle(a, b, bc, color);   // quad a, b, bc, ca
                     this._emitTriangle(a, bc, ca, color);  // fanned from a
                 }
@@ -451,7 +451,7 @@ namespace Testing3D {
 
         // append a new vertex on the segment ia->ib, exactly on the near plane.
         // both are indices into _verticesBuf, in CLIP SPACE (before divide).
-        private _clipLerpNear(ia: number, ib: number, near: number): number {
+        private _clipLerpNear(ia: number, ib: number): number {
             if (ia > ib) { const t = ia; ia = ib; ib = t; }
 
             const a = 4 * ia;
