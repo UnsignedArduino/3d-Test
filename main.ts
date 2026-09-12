@@ -1,4 +1,4 @@
-game.consoleOverlay.setVisible(true);
+// game.consoleOverlay.setVisible(true);
 game.stats = true;
 
 // all coordinates assume right handed y up
@@ -266,6 +266,22 @@ namespace Testing3D {
         public constructor() {}
     }
 
+    export interface RendererStats {
+        renderTime: number;
+        timeVertexCopy: number;
+        timeVertexMVCAndMirror: number;
+        timeVertexClipping: number;
+        timeVertexPerspective: number;
+        timeVertexCull: number;
+        timeVertexDraw: number;
+
+        trianglesRendered: number;
+        trianglesTouched: number;
+
+        pixelsTested: number;
+        pixelsTouched: number;
+    }
+
     export class Renderer {
         public target: Image;
 
@@ -278,6 +294,9 @@ namespace Testing3D {
 
         private _zBuf: number[] = [];
 
+        private _pixelsTestedThisFrame = 0;
+        private _pixelsTouchedThisFrame = 0;
+
         public constructor(target: Image) {
             this.target = target;
             for (let i = 0; i < this.target.width * this.target.height; i++) {
@@ -285,7 +304,20 @@ namespace Testing3D {
             }
         }
 
-        public render(scene: Scene, camera: Camera) {
+        public render(scene: Scene, camera: Camera): RendererStats {
+            const start = control.micros();
+            let trianglesTouched = 0;
+            let trianglesRendered = 0;
+            this._pixelsTestedThisFrame = 0;
+            this._pixelsTouchedThisFrame = 0;
+
+            let timeVertexCopy = 0;
+            let timeVertexMVCAndMirror = 0;
+            let timeVertexClipping = 0;
+            let timeVertexPerspective = 0;
+            let timeVertexCull = 0;
+            let timeVertexDraw = 0;
+
             this.target.fill(0);
             // reset z buffer
             for (let i = 0; i < this._zBuf.length; i++) {
@@ -293,11 +325,40 @@ namespace Testing3D {
             }
             const matrixCV = LinearAlgebra.matmul(camera.matrixC, camera.matrixV);
             for (const model of scene.models) {
-                this._renderModel(model, matrixCV, camera.near);
+                const timings = this._renderModel(model, matrixCV, camera.near);
+
+                trianglesRendered += this._trianglesBufCount;
+                trianglesTouched += model.mesh.triangles.length / 3;
+                timeVertexCopy += timings[1] - timings[0];
+                timeVertexMVCAndMirror += timings[2] - timings[1];
+                timeVertexClipping += timings[3] - timings[2];
+                timeVertexPerspective += timings[4] - timings[3];
+                timeVertexCull += timings[5] - timings[4];
+                timeVertexDraw += timings[6] - timings[5];
             }
+
+            const end = control.micros();
+            const elapsed = end - start;
+
+            return {
+                renderTime: elapsed,
+                timeVertexCopy,
+                timeVertexMVCAndMirror,
+                timeVertexClipping,
+                timeVertexPerspective,
+                timeVertexCull,
+                timeVertexDraw,
+
+                trianglesRendered,
+                trianglesTouched,
+                pixelsTested: this._pixelsTestedThisFrame,
+                pixelsTouched: this._pixelsTouchedThisFrame
+            };
         }
 
-        private _renderModel(model: Model, matrixCV: number[][], near: number) {
+        private _renderModel(model: Model, matrixCV: number[][], near: number): number[] {
+            const t0 = control.micros();
+
             //// copy data from model vertices and indicies
             // make every vector 4 long instead of 3 long, have space for w for verticies
             for (let i = 0; i < model.mesh.vertices.length / 3; i++) {
@@ -315,6 +376,8 @@ namespace Testing3D {
             for (let i = 0; i < model.mesh.materials.length; i++) {
                 this._materialsBuf[i] = model.mesh.materials[i];
             }
+
+            const t1 = control.micros();
 
             //// apply MVC to vertices
             const matrixM = model.transform.matrixM;
@@ -341,10 +404,14 @@ namespace Testing3D {
                     this._trianglesBuf[3 * t + 2] = tmp;
                 }
             }
+
+            const t2 = control.micros();
             
             //// clipping
             this._clipForPlane(0);  // near
             this._clipForPlane(1);  // far
+
+            const t3 = control.micros();
 
             //// perspective
             // apply to vertices
@@ -365,6 +432,8 @@ namespace Testing3D {
                 // flip Y, NDC has +Y up, screen has +Y down
                 this._verticesBuf[i + 1] = (1 - this._verticesBuf[i + 1]) * 0.5 * this.target.height - 0.5;
             }
+
+            const t4 = control.micros();
 
             //// backface cull
             let newTrianglesBufCount = 0;
@@ -393,6 +462,8 @@ namespace Testing3D {
             }
             this._trianglesBufCount = newTrianglesBufCount;
 
+            const t5 = control.micros();
+
             //// triangle drawing
             for (let i = 0; i < this._trianglesBufCount * 3; i += 3) {
                 // fetch vertex indices
@@ -415,6 +486,12 @@ namespace Testing3D {
                 //// fill triangle
                 this._fillTriangleZ(i0, i1, i2, c);
             }
+
+            const t6 = control.micros();
+
+            return [
+                t0, t1, t2, t3, t4, t5, t6
+            ]
         }
 
         // inside when a*x + b*y + c*z + d*w >= 0
@@ -552,26 +629,124 @@ namespace Testing3D {
 
             const W = this.target.width, H = this.target.height;
             const zb = this._zBuf;
+            const xStart = Math.max(Math.ceil(ax), 0);
             const xEnd = Math.min(Math.ceil(cx), W);
-            for (let x = Math.max(Math.ceil(ax), 0); x < xEnd; x++) {
-                const yLong = ay + (x - ax) * sAC;
-                const yShort = x < bx ? ay + (x - ax) * sAB : by + (x - bx) * sBC;
-                let y = Math.max(Math.ceil(Math.min(yLong, yShort)), 0);
-                const yEnd = Math.min(Math.ceil(Math.max(yLong, yShort)), H);
 
-                let z = az + (x - ax) * dzdx + (y - ay) * dzdy;
+            // before the loop, at the clamped start column
+            let yLong = ay + (xStart - ax) * sAC;
+            let zTop = az + (xStart - ax) * dzdx - ay * dzdy;  // z at (x, y=0)
+
+            for (let x = xStart; x < xEnd; x++) {
+                // pick the active short edge without recomputing from a vertex each time
+                const yShort = x < bx ? ay + (x - ax) * sAB : by + (x - bx) * sBC;
+
+                let yTop = yLong < yShort ? yLong : yShort;
+                let yBot = yLong < yShort ? yShort : yLong;
+                let y = Math.ceil(yTop); if (y < 0) y = 0;
+                let yEnd = Math.ceil(yBot); if (yEnd > H) yEnd = H;
+
+                let z = zTop + y * dzdy;
                 let zi = x * H + y;
                 while (y < yEnd) {
+                    this._pixelsTestedThisFrame ++;
                     if (z < zb[zi]) {
                         zb[zi] = z;
                         this.target.setPixel(x, y, color);
+                        this._pixelsTouchedThisFrame ++;
                     }
                     z += dzdy;
                     zi++;
                     y++;
                 }
+
+                yLong += sAC;
+                zTop += dzdx;
             }
+
+            // const W = this.target.width, H = this.target.height;
+            // const zb = this._zBuf;
+            // const xEnd = Math.min(Math.ceil(cx), W);
+            // for (let x = Math.max(Math.ceil(ax), 0); x < xEnd; x++) {
+            //     const yLong = ay + (x - ax) * sAC;
+            //     const yShort = x < bx ? ay + (x - ax) * sAB : by + (x - bx) * sBC;
+            //     let y = Math.max(Math.ceil(Math.min(yLong, yShort)), 0);
+            //     const yEnd = Math.min(Math.ceil(Math.max(yLong, yShort)), H);
+
+            //     let z = az + (x - ax) * dzdx + (y - ay) * dzdy;
+            //     let zi = x * H + y;
+            //     while (y < yEnd) {
+            //         this._pixelsTestedThisFrame ++;
+            //         if (z < zb[zi]) {
+            //             zb[zi] = z;
+            //             this.target.setPixel(x, y, color);
+            //             this._pixelsTouchedThisFrame ++;
+            //         }
+            //         z += dzdy;
+            //         zi++;
+            //         y++;
+            //     }
+            // }
         }
+    }
+}
+
+class FrameStats {
+    private times: number[]
+    private capacity: number
+    private index: number = 0
+    private filled: boolean = false
+
+    constructor(capacity: number = 300) {
+        this.capacity = capacity
+        this.times = []
+        for (let i = 0; i < capacity; i++) this.times.push(0)
+    }
+
+    addSample(micros: number) {
+        this.times[this.index] = micros
+        this.index = (this.index + 1) % this.capacity
+        if (this.index === 0) this.filled = true
+    }
+
+    private sampleCount(): number {
+        return this.filled ? this.capacity : this.index
+    }
+
+    private orderedByTime(): number[] {
+        const n = this.sampleCount()
+        const copy: number[] = []
+        for (let i = 0; i < n; i++) copy.push(this.times[i])
+        copy.sort((a, b) => b - a) // slowest first
+        return copy
+    }
+
+    avgFps(): number {
+        const n = this.sampleCount()
+        let sum = 0
+        for (let i = 0; i < n; i++) sum += this.times[i]
+        return 1000000 / (sum / n)
+    }
+
+    minFps(): number {
+        const n = this.sampleCount()
+        let maxT = this.times[0]
+        for (let i = 1; i < n; i++) if (this.times[i] > maxT) maxT = this.times[i]
+        return 1000000 / maxT
+    }
+
+    maxFps(): number {
+        const n = this.sampleCount()
+        let minT = this.times[0]
+        for (let i = 1; i < n; i++) if (this.times[i] < minT) minT = this.times[i]
+        return 1000000 / minT
+    }
+
+    lowFps(percentile: number): number {
+        const sorted = this.orderedByTime()
+        const count = Math.max(1, Math.round(sorted.length * percentile))
+        let sum = 0
+        for (let i = 0; i < count; i++) sum += sorted[i]
+        return 1000000 / (sum / count)
     }
 }
 
@@ -640,30 +815,87 @@ cubeMesh.vertices = VERTICES;
 cubeMesh.triangles = TRIANGLES;
 cubeMesh.materials = MATERIALS;
 
-const cubeModel1 = new Testing3D.Model(cubeMesh);
-cubeModel1.transform.translation = [-1, 0, 0];
-const cubeModel2 = new Testing3D.Model(cubeMesh);
-cubeModel2.transform.translation = [1, 0, 0];
+// const cubeModel1 = new Testing3D.Model(cubeMesh);
+// cubeModel1.transform.translation = [-1, 0, 0];
+// const cubeModel2 = new Testing3D.Model(cubeMesh);
+// cubeModel2.transform.translation = [1, 0, 0];
 
-const camera = new Testing3D.Camera([0, 0, 5], [0, 0, 0], aspect);
+// const modelScene = new Testing3D.Scene();
+// modelScene.models.push(cubeModel1);
+// modelScene.models.push(cubeModel2);
+
+const CUBE_AMOUNT = 1000;
+const modelScene = new Testing3D.Scene();
+
+for (let i = 0; i < CUBE_AMOUNT; i ++) {
+    const cubeModel = new Testing3D.Model(cubeMesh);
+    cubeModel.transform.translation = [
+        randint(-500, 500) / 100,
+        randint(-500, 500) / 100,
+        randint(-500, 500) / 100,
+    ]
+    // cubeModel.transform.rotation = [
+    //     randint(1, 628) / 100,
+    //     randint(1, 628) / 100,
+    //     randint(1, 628) / 100
+    // ];
+    modelScene.models.push(cubeModel);
+}
+
+const camera = new Testing3D.Camera([0, 0, 10], [0, 0, 0], aspect);
 camera.fovY = 70 * Math.PI / 180;
 camera.near = 0.1;
 camera.far = 100;
 
-const modelScene = new Testing3D.Scene();
-modelScene.models.push(cubeModel1);
-modelScene.models.push(cubeModel2);
-
 const renderer = new Testing3D.Renderer(picture);
 
+const frameStats = new FrameStats(100);
+
+let statsStr = "";
+
 game.onUpdate(() => {
-    cubeModel1.transform.rotation[0] = game.runtime() / 4000 * Math.PI;
-    cubeModel1.transform.rotation[1] = game.runtime() / 4000 * Math.PI;
-    cubeModel1.transform.rotation[2] = game.runtime() / 4000 * Math.PI;
+    // cubeModel1.transform.rotation[0] = game.runtime() / 4000 * Math.PI;
+    // cubeModel1.transform.rotation[1] = game.runtime() / 4000 * Math.PI;
+    // cubeModel1.transform.rotation[2] = game.runtime() / 4000 * Math.PI;
 
-    cubeModel2.transform.rotation[0] = game.runtime() / 2000 * -Math.PI;
-    cubeModel2.transform.rotation[1] = game.runtime() / 2000 * -Math.PI;
-    cubeModel2.transform.rotation[2] = game.runtime() / 2000 * -Math.PI;
+    // cubeModel2.transform.rotation[0] = game.runtime() / 2000 * -Math.PI;
+    // cubeModel2.transform.rotation[1] = game.runtime() / 2000 * -Math.PI;
+    // cubeModel2.transform.rotation[2] = game.runtime() / 2000 * -Math.PI;
 
-    renderer.render(modelScene, camera);
+    for (let i = 0; i < modelScene.models.length; i ++) {
+        const m = modelScene.models[i];
+        let r = game.runtime() / 1000 * Math.PI;
+        if (i % 3 == 0) {
+            r /= 4;
+        } else if (i % 3 == 1) {
+            r /= 2;
+        } else /* if (i % 3 == 2) */ {
+            r /= 1;
+        }
+        m.transform.rotation[0] = r;
+        m.transform.rotation[1] = r / 2;
+        m.transform.rotation[2] = r / 4;
+    }
+
+    const stats = renderer.render(modelScene, camera);
+
+    frameStats.addSample(stats.renderTime);
+
+    statsStr = `triangles: ${stats.trianglesRendered} / ${stats.trianglesTouched}\n` +
+        `px test: ${stats.pixelsTested}\n` +
+        `px touch: ${stats.pixelsTouched}\n` + 
+        `avg: ${Math.roundWithPrecision(frameStats.avgFps(), 2)} fps\n` +
+        `1% low: ${Math.roundWithPrecision(frameStats.lowFps(0.01), 2)} fps\n` +
+        `copy: ${stats.timeVertexCopy / 1000} ms\n` +
+        `mvc and mirror: ${stats.timeVertexMVCAndMirror / 1000} ms\n` +
+        `clip: ${stats.timeVertexClipping / 1000} ms\n` +
+        `perspective: ${stats.timeVertexPerspective / 1000} ms\n` +
+        `cull: ${stats.timeVertexCull / 1000} ms\n` +
+        `draw: ${stats.timeVertexDraw / 1000} ms\n` +
+        `total: ${stats.renderTime / 1000} ms\n`;
+
+    renderer.target.print(statsStr, 0, 0, 15);
+});
+controller.A.onEvent(ControllerButtonEvent.Pressed, () => {
+    console.log(statsStr);
 });
