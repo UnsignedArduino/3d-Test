@@ -276,12 +276,21 @@ namespace Testing3D {
         private _verticesBufCount: number = 0;
         private _trianglesBufCount: number = 0;
 
+        private _zBuf: number[] = [];
+
         public constructor(target: Image) {
             this.target = target;
+            for (let i = 0; i < this.target.width * this.target.height; i++) {
+                this._zBuf.push(2);
+            }
         }
 
         public render(scene: Scene, camera: Camera) {
             this.target.fill(0);
+            // reset z buffer
+            for (let i = 0; i < this._zBuf.length; i++) {
+                this._zBuf[i] = 2;
+            }
             const matrixCV = LinearAlgebra.matmul(camera.matrixC, camera.matrixV);
             for (const model of scene.models) {
                 this._renderModel(model, matrixCV, camera.near);
@@ -390,20 +399,21 @@ namespace Testing3D {
                 const i0 = this._trianglesBuf[i];
                 const i1 = this._trianglesBuf[i + 1];
                 const i2 = this._trianglesBuf[i + 2];
-                // get px coords
-                const ax = this._verticesBuf[4 * i0];
-                const ay = this._verticesBuf[4 * i0 + 1];
-                const bx = this._verticesBuf[4 * i1];
-                const by = this._verticesBuf[4 * i1 + 1];
-                const cx = this._verticesBuf[4 * i2];
-                const cy = this._verticesBuf[4 * i2 + 1];
+                // // get px coords
+                // const ax = this._verticesBuf[4 * i0];
+                // const ay = this._verticesBuf[4 * i0 + 1];
+                // const bx = this._verticesBuf[4 * i1];
+                // const by = this._verticesBuf[4 * i1 + 1];
+                // const cx = this._verticesBuf[4 * i2];
+                // const cy = this._verticesBuf[4 * i2 + 1];
                 // get material (flat color for now)
                 const c = this._materialsBuf[i / 3];
+                //// wireframe
                 // this.target.drawLine(ax, ay, bx, by, c);
                 // this.target.drawLine(bx, by, cx, cy, c);
                 // this.target.drawLine(cx, cy, ax, ay, c);
-                // fill triangles TODO Z BUFFER
-                this.target.fillTriangle(ax, ay, bx, by, cx, cy, c);
+                //// fill triangle
+                this._fillTriangleZ(i0, i1, i2, c);
             }
         }
 
@@ -516,6 +526,52 @@ namespace Testing3D {
             }
             this._trianglesBufCount = n;
         }
+
+        private _fillTriangleZ(i0: number, i1: number, i2: number, color: number) {
+            const v = this._verticesBuf;
+            // sort the three vertex indices by screen x: a is leftmost, c is rightmost
+            let t: number;
+            if (v[4 * i1] < v[4 * i0]) { t = i0; i0 = i1; i1 = t; }
+            if (v[4 * i2] < v[4 * i1]) { t = i1; i1 = i2; i2 = t; }
+            if (v[4 * i1] < v[4 * i0]) { t = i0; i0 = i1; i1 = t; }
+
+            const ax = v[4 * i0], ay = v[4 * i0 + 1], az = v[4 * i0 + 2];
+            const bx = v[4 * i1], by = v[4 * i1 + 1], bz = v[4 * i1 + 2];
+            const cx = v[4 * i2], cy = v[4 * i2 + 1], cz = v[4 * i2 + 2];
+
+            // depth plane: z(x, y) = az + (x - ax) * dzdx + (y - ay) * dzdy
+            const area = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+            if (area == 0) return;
+            const dzdx = ((bz - az) * (cy - ay) - (cz - az) * (by - ay)) / area;
+            const dzdy = ((bx - ax) * (cz - az) - (cx - ax) * (bz - az)) / area;
+
+            // edge slopes (dy per column). a zero-width edge is never used, so 0 is a safe placeholder
+            const sAC = cx > ax ? (cy - ay) / (cx - ax) : 0; // long edge, spans every column
+            const sAB = bx > ax ? (by - ay) / (bx - ax) : 0; // short edge, left part
+            const sBC = cx > bx ? (cy - by) / (cx - bx) : 0; // short edge, right part
+
+            const W = this.target.width, H = this.target.height;
+            const zb = this._zBuf;
+            const xEnd = Math.min(Math.ceil(cx), W);
+            for (let x = Math.max(Math.ceil(ax), 0); x < xEnd; x++) {
+                const yLong = ay + (x - ax) * sAC;
+                const yShort = x < bx ? ay + (x - ax) * sAB : by + (x - bx) * sBC;
+                let y = Math.max(Math.ceil(Math.min(yLong, yShort)), 0);
+                const yEnd = Math.min(Math.ceil(Math.max(yLong, yShort)), H);
+
+                let z = az + (x - ax) * dzdx + (y - ay) * dzdy;
+                let zi = x * H + y;
+                while (y < yEnd) {
+                    if (z < zb[zi]) {
+                        zb[zi] = z;
+                        this.target.setPixel(x, y, color);
+                    }
+                    z += dzdy;
+                    zi++;
+                    y++;
+                }
+            }
+        }
     }
 }
 
@@ -589,7 +645,7 @@ cubeModel1.transform.translation = [-1, 0, 0];
 const cubeModel2 = new Testing3D.Model(cubeMesh);
 cubeModel2.transform.translation = [1, 0, 0];
 
-const camera = new Testing3D.Camera([0, 0, 10], [0, 0, 0], aspect);
+const camera = new Testing3D.Camera([0, 0, 5], [0, 0, 0], aspect);
 camera.fovY = 70 * Math.PI / 180;
 camera.near = 0.1;
 camera.far = 100;
@@ -605,9 +661,9 @@ game.onUpdate(() => {
     cubeModel1.transform.rotation[1] = game.runtime() / 4000 * Math.PI;
     cubeModel1.transform.rotation[2] = game.runtime() / 4000 * Math.PI;
 
-    cubeModel2.transform.rotation[0] = game.runtime() / 4000 * -Math.PI;
-    cubeModel2.transform.rotation[1] = game.runtime() / 4000 * -Math.PI;
-    cubeModel2.transform.rotation[2] = game.runtime() / 4000 * -Math.PI;
+    cubeModel2.transform.rotation[0] = game.runtime() / 2000 * -Math.PI;
+    cubeModel2.transform.rotation[1] = game.runtime() / 2000 * -Math.PI;
+    cubeModel2.transform.rotation[2] = game.runtime() / 2000 * -Math.PI;
 
     renderer.render(modelScene, camera);
 });
